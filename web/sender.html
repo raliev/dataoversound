@@ -226,7 +226,7 @@ function fit(text) {
 }
 
 let debounce = null;
-$('msg').addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(updateMessage, 250); });
+$('msg').addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(updateMessage, 700); });
 
 function updateMessage() {
   if (!S.codec) return;
@@ -247,7 +247,10 @@ function updateMessage() {
   } else if (raw.trim()) {
     const f = fit(raw), pk = WMCore.buildPacket(S.W, f.bits);
     S.packet = pk;
-    S.schedule = [{ start: 0, end: 1e9, chips: pk.chips, packet: pk, text: f.text }];
+    // в эфире круг начинается заново (с синхрослова) с момента изменения текста — приёмнику
+    // не нужно ждать конца старого круга; в «Download» круг начинается с начала трека
+    const origin = S.playing ? S.pos + 0.15 : S.pos;
+    S.schedule = [{ start: -1e9, end: 1e9, origin, chips: pk.chips, packet: pk, text: f.text }];
     stats.push(`<span class="chip mode">Looped message</span>`,
       `<span class="chip">${f.text.length} chars → ${f.bits.length} bits</span>`,
       `<span class="chip">loops every ${pk.seconds.toFixed(0)} s</span>`);
@@ -262,7 +265,7 @@ function updateMessage() {
 
 function sendSchedule() {
   if (!S.node) return;
-  S.node.port.postMessage({ type: 'schedule', items: S.schedule.map(({ start, end, chips }) => ({ start, end, chips })) });
+  S.node.port.postMessage({ type: 'schedule', items: S.schedule.map(({ start, end, chips, origin }) => ({ start, end, chips, origin })) });
 }
 
 // ---------- визуализация передаваемых бит ----------
@@ -337,12 +340,12 @@ function frame() {
   const it = currentItem();
   if (it && bitEls.length) {
     const halfDur = (S.W.half_hops * S.W.hop) / 48000;
-    const k = Math.floor((S.pos - it.start) / halfDur / 2) % it.packet.bits.length;
+    const nb = it.packet.bits.length, k0 = Math.floor((S.pos - (it.origin ?? it.start)) / halfDur / 2), k = ((k0 % nb) + nb) % nb;
     if (k !== lastCur) {
       bitEls.forEach((el, i) => { el.classList.toggle('cur', i === k); el.classList.toggle('done', i < k); });
       lastCur = k;
     }
-    const loopPos = ((S.pos - it.start) % it.packet.seconds);
+    const ps = it.packet.seconds, loopPos = (((S.pos - (it.origin ?? it.start)) % ps) + ps) % ps;
     const on = S.playing && !!S.L;
     $('liveDot').classList.toggle('off', !on);
     $('txText').textContent = on ? 'ON AIR' : S.L ? 'Paused' : 'Ready — load an MP3 to transmit';
@@ -359,7 +362,7 @@ $('dl').onclick = async () => {
   btn.disabled = true;
   try {
     const emb = new WMCore.Embedder(S.W, 48000);
-    emb.schedule = S.schedule.map(({ start, end, chips }) => ({ start, end, chips }));
+    emb.schedule = S.schedule.map(({ start, end, chips }) => ({ start: Math.max(0, start), end, chips }));
     const [yL, yR] = await emb.render(S.L, S.R, (p) => { st.textContent = `Embedding… ${Math.round(p * 100)}%`; });
     let peak = 0;
     for (let i = 0; i < yL.length; i++) peak = Math.max(peak, Math.abs(yL[i]), Math.abs(yR[i]));

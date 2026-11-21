@@ -224,6 +224,9 @@ async function start() {
       S.lastText = m.text;
     } else if (!samePacket(S.confirmed, m, H) || m.text !== S.lastText) pushLine(m.text);
     S.confirmed = { K: m.K, x: m.x }; S.live = null;
+  }, onChange: () => {                                  // передатчик сменил сообщение — слушаем заново
+    log('message changed — re-tuning');
+    S.confirmed = null; S.live = null; S.locked = false;
   } });
   const us = new DosDecoder.UltrasoundDecoder(P.ultrasound, S.sr, { onMessage: (m) => { log(`ultrasound: ${m.text}`); pushLine(m.text, 'ultrasound'); } });
   node.port.onmessage = (e) => { pd.push(e.data); us.push(e.data); };
@@ -243,7 +246,8 @@ async function start() {
     $('dot').className = 'dot ' + (S.locked && !S.live ? 'locked' : pct > 0.2 || S.live ? 'tuning' : '');
     $('status').textContent = S.live ? 'Receiving…' : S.locked ? 'Message received' : pct > 0.2 ? 'Tuning in…' : 'Listening…';
     $('heard').textContent = fmt(pd.heard);
-    $('debug').textContent = `${S.sr} Hz · sync z=${z.toFixed(2)} (packet K=${pd.best.K}) · heard ${pd.heard.toFixed(0)} s\n` + S.log.join('\n');
+    $('debug').textContent = `${S.sr} Hz · sync z=${z.toFixed(2)} (packet K=${pd.best.K}) · heard ${pd.heard.toFixed(0)} s` +
+      (pd.lock ? ` · tracking r=${pd.lock.r.toFixed(2)}` : '') + '\n' + S.log.join('\n');
   }, 700);
   log(`microphone: ${S.sr} Hz`);
   try { await navigator.wakeLock?.request('screen'); } catch {}

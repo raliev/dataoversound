@@ -179,12 +179,13 @@
       this.schedule = []; this.alpha = W.alpha;
     }
 
-    // schedule: [{start, end, chips}] — в каком интервале времени какой пакет крутится
+    // schedule: [{start, end, chips, origin?}] — в каком интервале времени какой пакет крутится;
+    // origin — момент начала круга (по умолчанию start): с него пакет идёт с синхрослова
     chipAt(t) {
       for (const s of this.schedule) {
         if (t >= s.start && t < s.end) {
-          const k = Math.floor((t - s.start) / this.halfDur);
-          return s.chips[k % s.chips.length];
+          const n = s.chips.length, k = Math.floor((t - (s.origin ?? s.start)) / this.halfDur);
+          return s.chips[((k % n) + n) % n];
         }
       }
       return 0;

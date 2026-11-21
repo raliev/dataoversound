@@ -678,6 +678,9 @@
         return { K, ci, period, acc: new Float64Array(period), sync: Int8Array.from(ci.sync, (b) => (b ? 1 : -1)) };
       });
       this.tau = P.packet.tau; this.nextH = 0; this.heard = 0;
+      this.onChange = opts.onChange || (() => {});
+      this.streakFrom = 0; this.grew = false;
+      this.lock = null; this.trackLam = Math.exp(-this.hopDur / 2);
       this.best = { z: 0, K: 0 }; this.level = 0;
     }
 
@@ -692,9 +695,39 @@
       for (; h < end; h++) {
         const v = fe.d[h - fe.cBase], u = Math.round(h * this.ratio);
         for (const c of this.classes) c.acc[u % c.period] += v;
+        if (this.lock) this._track(h, u, v);
       }
       this.heard += (end - this.nextH) * this.hopDur;
       this.nextH = end;
+    }
+
+    // После подтверждения знаем точный узор пакета и сверяем с ним звук. Если узор устойчиво
+    // перестал совпадать — сообщение сменилось: выбрасываем старое и пересобираем накопители из
+    // последних секунд (начало нового синхрослова не теряется).
+    _track(h, u, v) {
+      const L = this.lock, lam = this.trackLam;
+      const pos = (((u - L.x) % L.period) + L.period) % L.period;
+      const chip = L.chips[Math.floor(pos / this.H)];
+      L.num = lam * L.num + v * chip; L.den = lam * L.den + v * v; L.n = lam * L.n + 1;
+      const r = L.num / Math.sqrt(L.den * L.n + 1e-30);
+      L.r = r;
+      if (r > 0.12) L.seen = true;
+      if (!L.seen || L.n < 100) return;
+      if (r < 0.06) { if (L.dropAt === null) L.dropAt = h; }
+      else if (r > 0.1) L.dropAt = null;
+      if (L.dropAt !== null && (h - L.dropAt) * this.hopDur > 2.5) {
+        // r падает с задержкой ~окна слежения — берём звук с запасом, чтобы новое синхрослово
+        // (оно звучит сразу после смены текста) целиком попало в накопители
+        const from = Math.max(this.fe.cBase, L.dropAt - Math.round(7 / this.hopDur));
+        this.lock = null;
+        for (const c of this.classes) c.acc.fill(0);
+        for (let k = from; k <= h; k++) {
+          const vv = this.fe.d[k - this.fe.cBase], uu = Math.round(k * this.ratio);
+          for (const c of this.classes) c.acc[uu % c.period] += vv;
+        }
+        this.heard = (h - from) * this.hopDur;
+        this.onChange();
+      }
     }
 
     reset() { for (const c of this.classes) c.acc.fill(0); this.heard = 0; }
@@ -735,7 +768,15 @@
           const r = Core.decodeSoft(c.ci, soft);
           if (r.ok && this.codec) {
             const text = this.codec.decode(Array.from(r.payload));
-            if (text) { found.push({ text, K: c.K, z: zs, x }); continue; }
+            if (text) {
+              found.push({ text, K: c.K, z: zs, x });
+              const pk = Core.buildPacket(this.P, Array.from(r.payload));
+              const L = this.lock;
+              if (!L || L.K !== c.K || L.text !== text) {
+                this.lock = { K: c.K, x, text, period: Pn, chips: pk.chips, num: 0, den: 0, n: 0, r: 0, seen: false, dropAt: null };
+              } else L.x = x;
+              continue;
+            }
           }
           // догадка: общий счёт = согласие синхрослова и всех услышанных бит с перекодированным путём
           let sa = s / sigma, e = 0;
@@ -772,10 +813,14 @@
         for (const w of words) { if (w.state !== 'solid') break; solid.push(w.text); }
         const prev = this.prevSolid || [];
         const n = Math.min(prev.length, solid.length);
-        const grows = same && solid.length > 0 && prev.slice(0, n).join('\u0001') === solid.slice(0, n).join('\u0001');
-        this.streak = grows ? (this.streak || 0) + 1 : 0;
+        const consistent = same && solid.length > 0 && prev.slice(0, n).join('\u0001') === solid.slice(0, n).join('\u0001');
+        if (!consistent) { this.streakFrom = this.heard; this.grew = false; }
+        else if (solid.length > prev.length) this.grew = true;
         this.prevSolid = solid;
-        this.tentative = { z: tent.z, zs: tent.zs, K: tent.K, x: tent.x, words, ok: tent.zs >= 5 && this.streak >= 2 };
+        // пока подтверждённое сообщение всё ещё совпадает со звуком, другие догадки — эхо того же
+        // сильного сигнала в чужих накопителях, их не показываем
+        const busy = this.lock && this.lock.seen && this.lock.dropAt === null;
+        this.tentative = { z: tent.z, zs: tent.zs, K: tent.K, x: tent.x, words, ok: !busy && tent.zs >= 5 && this.grew && this.heard - this.streakFrom >= 4 };
       }
       for (const f of found) this.onMessage({ ...f, heard: this.heard });
       return found;
