@@ -701,7 +701,7 @@
 
     process() {
       const H = this.H, ns = this.P.packet.sync_bits;
-      let best = { z: 0, K: 0 };
+      let best = { z: 0, K: 0 }, tent = null;
       const found = [];
       for (const c of this.classes) {
         const Pn = c.period, a = c.acc, pre = new Float64Array(2 * Pn + 1);
@@ -712,26 +712,71 @@
           bit[x] = (pre[x + H] - pre[x]) - (pre[x + 2 * H] - pre[x + H]);
           if (a[x] !== 0) { e2 += bit[x] * bit[x]; nz++; }      // шум — только по уже услышанным позициям
         }
-        if (nz < Pn / 4) continue;                               // услышано меньше четверти круга
+        if (nz < (ns + 8) * 2 * H) continue;                    // ещё не слышали даже синхрослово
         const sigma = Math.sqrt(e2 / nz) + 1e-12;
-        let b1 = -Infinity, x1 = 0, b2 = -Infinity, x2 = 0;
+        // три лучших положения синхрослова
+        const top = [];
         for (let x = 0; x < Pn; x++) {
           let s = 0;
           for (let i = 0; i < ns; i++) s += c.sync[i] * bit[(x + i * 2 * H) % Pn];
-          if (s > b1) { b2 = b1; x2 = x1; b1 = s; x1 = x; } else if (s > b2 && Math.abs(x - x1) > H) { b2 = s; x2 = x; }
+          if (top.length < 3 || s > top[top.length - 1].s) {
+            const near = top.findIndex((t) => Math.abs(t.x - x) <= H || Math.abs(t.x - x) >= Pn - H);
+            if (near >= 0) { if (s > top[near].s) top[near] = { x, s }; else continue; }
+            else top.push({ x, s });
+            top.sort((p, q) => q.s - p.s); if (top.length > 3) top.pop();
+          }
         }
-        const z1 = b1 / (sigma * Math.sqrt(ns));
-        if (z1 > best.z) best = { z: z1, K: c.K };
-        for (const [x, z] of [[x1, z1], [x2, b2 / (sigma * Math.sqrt(ns))]]) {
-          if (z < 2.5) continue;
+        for (const { x, s } of top) {
+          const zs = s / (sigma * Math.sqrt(ns));
+          if (zs > best.z) best = { z: zs, K: c.K };
+          if (zs < 2) continue;
           const soft = new Float64Array(c.ci.coded);
-          for (let j = 0; j < soft.length; j++) soft[j] = bit[(x + (ns + j) * 2 * H) % Pn];
-          const payload = Core.decodePacket(c.ci, soft);
-          const text = payload && this.codec ? this.codec.decode(Array.from(payload)) : null;
-          if (text !== null && text !== undefined && text.length) { found.push({ text, K: c.K, z }); break; }
+          for (let j = 0; j < soft.length; j++) soft[j] = bit[(x + (ns + j) * 2 * H) % Pn] / sigma;
+          const r = Core.decodeSoft(c.ci, soft);
+          if (r.ok && this.codec) {
+            const text = this.codec.decode(Array.from(r.payload));
+            if (text) { found.push({ text, K: c.K, z: zs, x }); continue; }
+          }
+          // догадка: общий счёт = согласие синхрослова и всех услышанных бит с перекодированным путём
+          let sa = s / sigma, e = 0;
+          for (let i = 0; i < ns; i++) { const v = bit[(x + i * 2 * H) % Pn] / sigma; e += v * v; }
+          for (let j = 0; j < soft.length; j++) { sa += r.agree[j]; e += soft[j] * soft[j]; }
+          const zt = sa / Math.sqrt(e + 1e-9);
+          let A = 0, M = 0;
+          for (let j = 0; j < soft.length; j++) { A += r.agree[j]; M += Math.abs(soft[j]); }
+          const ratio = M > 0 ? A / M : 0;
+          if (!tent || ratio * Math.sqrt(M) > tent.score) tent = { z: zt, ratio, score: ratio * Math.sqrt(M), zs, K: c.K, x, r };
         }
       }
       this.best = best;
+      // слова догадки с уверенностью: среднее согласие бит слова (+ хвост кода после него)
+      this.tentative = null;
+      if (tent && this.codec) {
+        const { r } = tent, d = this.codec.decodeTokens(Array.from(r.payload));
+        const words = this.codec.words(d.toks).map((w) => {
+          const lo = 2 * w.start, hi = Math.min(r.agree.length, 2 * w.end + 12);
+          let s = 0, m = 0, heard = 0;
+          for (let i = lo; i < hi; i++) { s += r.agree[i]; m += Math.abs(r.soft[i]); if (r.soft[i] !== 0) heard++; }
+          // слово надёжно, только если услышаны все его биты и ещё длина кода после него —
+          // иначе Витерби угадывает «хвост»; conf — доля согласия бит с догадкой
+          const h = hi > lo ? heard / (hi - lo) : 0, conf = m > 0 ? s / m : 0;
+          const state = h >= 1 && conf >= 0.75 ? 'solid' : h > 0.25 ? 'resolving' : 'hidden';
+          return { text: w.text, glue: w.glue, conf, heard: h, state };
+        });
+        // догадке верим, если синхрослово сильное и кандидат устойчив (у шума он скачет)
+        const same = this.prevTent && this.prevTent.K === tent.K && Math.abs(this.prevTent.x - tent.x) <= this.H;
+        this.stable = same ? (this.stable || 0) + 1 : 1;
+        this.prevTent = { K: tent.K, x: tent.x };
+        // и если надёжные слова растут, продолжая прежние (у шума слова меняются на каждом пересчёте)
+        const solid = [];
+        for (const w of words) { if (w.state !== 'solid') break; solid.push(w.text); }
+        const prev = this.prevSolid || [];
+        const n = Math.min(prev.length, solid.length);
+        const grows = same && solid.length > 0 && prev.slice(0, n).join('\u0001') === solid.slice(0, n).join('\u0001');
+        this.streak = grows ? (this.streak || 0) + 1 : 0;
+        this.prevSolid = solid;
+        this.tentative = { z: tent.z, zs: tent.zs, K: tent.K, x: tent.x, words, ok: tent.zs >= 5 && this.streak >= 2 };
+      }
       for (const f of found) this.onMessage({ ...f, heard: this.heard });
       return found;
     }

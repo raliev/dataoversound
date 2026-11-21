@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "ultrasound": {
     "base": 17900,
     "spacing": 55,
@@ -49,8 +49,9 @@
         224,
         256
       ],
-      "sync_bits": 24,
-      "tau": 60
+      "sync_bits": 48,
+      "tau": 60,
+      "interleave": 16
     }
   }
 }

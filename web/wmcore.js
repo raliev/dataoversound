@@ -66,14 +66,13 @@
   const G1 = 0o133, G2 = 0o171, TAIL = 6;
   const parity = (x) => { x ^= x >> 4; x ^= x >> 2; x ^= x >> 1; return x & 1; };
 
+  // Короткое перемежение (блоки по 16 бит, бит-реверс): биты идут почти по порядку, поэтому
+  // начало пакета можно раскодировать, не дослушав круг, — слова появляются по мере прихода.
+  const BR16 = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
   function classInfo(W, K) {
-    const Pk = W.packet, coded = 2 * (K + 16 + TAIL);
+    const Pk = W.packet, coded = 2 * (K + 16 + TAIL), B = Pk.interleave || 16;
     const perm = Array.from({ length: coded }, (_, i) => i);
-    let x = (W.seed ^ Math.imul(K, 0x2545f491)) >>> 0 || 1;
-    for (let i = coded - 1; i > 0; i--) {   // Фишер–Йетс на xorshift
-      x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0;
-      const j = x % (i + 1); const t = perm[i]; perm[i] = perm[j]; perm[j] = t;
-    }
+    for (let b = 0; b + B <= coded; b += B) for (let i = 0; i < B; i++) perm[b + i] = b + (B === 16 ? BR16[i] : i);
     return {
       K, coded, perm,
       whiten: prbs((W.seed ^ Math.imul(K, 7919) ^ 0x5bd1e995) >>> 0, coded),
@@ -141,18 +140,27 @@
     return out;
   }
 
-  // мягкие биты пакета без синхрослова → полезная нагрузка или null
-  function decodePacket(ci, softTx) {
+  // мягкие биты пакета (без синхрослова, в порядке передачи) → лучшая догадка Витерби:
+  // info — биты (текст+CRC+хвост), soft — снятые маска/перемежение, agree — согласие каждого
+  // принятого бита с перекодированной догадкой (0 там, где ещё ничего не услышано)
+  function decodeSoft(ci, softTx) {
     const soft = new Float64Array(ci.coded);
     for (let i = 0; i < ci.coded; i++) {
       const p = ci.perm[i];
       soft[i] = ci.whiten[p] ? -softTx[p] : softTx[p];
     }
     const info = viterbi(soft, ci.K + 16 + TAIL);
-    const payload = info.subarray(0, ci.K);
+    const re = convEncode(info), agree = new Float64Array(ci.coded);
+    for (let i = 0; i < ci.coded; i++) agree[i] = re[i] ? soft[i] : -soft[i];
     let crc = 0;
     for (let i = 0; i < 16; i++) crc = (crc << 1) | info[ci.K + i];
-    return crc16bits(payload) === crc ? payload : null;
+    const payload = info.subarray(0, ci.K);
+    return { info, payload, soft, agree, ok: crc16bits(payload) === crc };
+  }
+
+  function decodePacket(ci, softTx) {
+    const r = decodeSoft(ci, softTx);
+    return r.ok ? r.payload : null;
   }
 
   // ---------- встраивание (стерео одним комплексным БПФ: re=L, im=R) ----------
@@ -222,7 +230,7 @@
     }
   }
 
-  const api = { fft, prbs, crc16bits, pattern, classInfo, convEncode, buildPacket, viterbi, decodePacket, Embedder };
+  const api = { fft, prbs, crc16bits, pattern, classInfo, convEncode, buildPacket, viterbi, decodeSoft, decodePacket, Embedder };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.WMCore = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
