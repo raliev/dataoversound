@@ -1,0 +1,23 @@
+1
+00:00:00,000 --> 00:00:03,500
+The squirrel has left the building. Repeat: the nuts are secure.
+
+2
+00:00:03,000 --> 00:00:06,000
+The chair is against the wall. John has a long mustache.
+
+3
+00:00:06,000 --> 00:00:09,000
+Tell Grandma the apple pie is in the oven.
+
+4
+00:00:09,000 --> 00:00:12,000
+Operation Rubber Duck is a go. I repeat: the bathtub is full.
+
+5
+00:00:12,000 --> 00:00:15,000
+Package delivered. The pigeon has landed on the toaster. ✨
+
+6
+00:00:15,000 --> 00:00:18,000
+Abort mission! The hamster is onto us.

@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hidden Message Transmitter</title>
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #12151c; --line: rgba(255,255,255,.08); --fg: #eef0f4; --dim: #8b91a1;
+    --accent: #5eead4; --accent2: #a78bfa; --warn: #f5b454;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 36px 20px 60px; }
+  h1 { font-size: 22px; font-weight: 650; margin: 0 0 4px; letter-spacing: -.01em; }
+  .sub { color: var(--dim); margin: 0 0 28px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; margin-bottom: 18px; }
+  .label { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin-bottom: 12px; }
+  button { font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--line); background: #1b1f29; color: var(--fg); padding: 9px 16px; }
+  button:hover:not(:disabled) { background: #232837; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--fg); color: var(--bg); border-color: transparent; font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: #fff; }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  #fname { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 120px; }
+  #drop.over { outline: 2px dashed var(--accent); outline-offset: 4px; }
+
+  .player { margin-top: 16px; display: none; }
+  .player.on { display: block; }
+  #playBtn { width: 44px; height: 44px; border-radius: 50%; padding: 0; font-size: 16px; }
+  .bar { position: relative; flex: 1; height: 6px; background: rgba(255,255,255,.08); border-radius: 3px; cursor: pointer; }
+  .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--fg); border-radius: 3px; width: 0; }
+  .time { font-variant-numeric: tabular-nums; color: var(--dim); font-size: 13px; min-width: 92px; text-align: right; }
+
+  textarea { width: 100%; min-height: 140px; resize: vertical; background: #0e1117; color: var(--fg); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px; font: 17px/1.45 inherit; font-family: inherit; outline: none; }
+  textarea:focus { border-color: rgba(94,234,212,.5); }
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; font-size: 13px; color: var(--dim); }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
+  .chip.mode { color: var(--accent); border-color: rgba(94,234,212,.35); }
+  .warn { color: var(--warn); font-size: 13px; margin-top: 10px; display: none; }
+  .warn.on { display: block; }
+
+  .tx { margin-top: 16px; display: none; }
+  .tx.on { display: block; }
+  .txhead { display: flex; justify-content: space-between; font-size: 13px; color: var(--dim); margin-bottom: 8px; }
+  .bits { display: flex; gap: 2px; height: 22px; align-items: flex-end; overflow: hidden; }
+  .bits b { flex: 1; min-width: 1px; background: rgba(255,255,255,.12); border-radius: 1px; height: 40%; transition: background .15s; }
+  .bits b.one { height: 100%; }
+  .bits b.sync { background: rgba(167,139,250,.35); }
+  .bits b.cur { background: var(--accent) !important; }
+  .bits b.done { background: rgba(94,234,212,.35); }
+
+  .dl { display: flex; align-items: center; gap: 14px; }
+  #dlStatus { color: var(--dim); font-size: 13px; }
+  .foot { color: var(--dim); font-size: 13px; margin-top: 26px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Hidden Message Transmitter</h1>
+  <p class="sub">The message is woven into the music itself — inaudibly. A listening device recovers it from sound alone.</p>
+
+  <div class="card" id="drop">
+    <div class="label">Audio</div>
+    <div class="row">
+      <button id="browse">Browse…</button>
+      <span id="fname">No file selected — or drop an MP3 here</span>
+      <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a" hidden>
+    </div>
+    <div class="player" id="player">
+      <div class="row">
+        <button id="playBtn" aria-label="Play">▶</button>
+        <div class="bar" id="bar"><i id="barFill"></i></div>
+        <span class="time" id="time">0:00 / 0:00</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="label">Message</div>
+    <textarea id="msg" placeholder="Type a message… or paste an .srt file" spellcheck="false"></textarea>
+    <div class="stats" id="stats"></div>
+    <div class="warn" id="warn"></div>
+    <div class="tx" id="tx">
+      <div class="txhead"><span id="txLabel">Transmitting</span><span id="txLoop"></span></div>
+      <div class="bits" id="bits"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="dl">
+      <button class="primary" id="dl" disabled>Download MP3</button>
+      <span id="dlStatus">The file carries the message in any player.</span>
+    </div>
+  </div>
+
+  <p class="foot">Tip: the receiver locks on after it has heard the message loop once or twice — short messages arrive faster.
+    English text is compressed with a shared dictionary (≈10 bits per word).</p>
+</div>
+
+<script src="wmcore.js"></script>
+<script src="textcodec.js"></script>
+<script src="vendor/lame.min.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const S = { ctx: null, node: null, L: null, R: null, name: '', dur: 0, pos: 0, playing: false, schedule: [], W: null, codec: null, packet: null };
+const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+
+async function init() {
+  const proto = await (await fetch('protocol.json')).json();
+  S.W = proto.watermark;
+  S.codec = new TextCodec(await (await fetch('vocab.json')).json());
+  updateMessage();
+}
+
+async function ensureAudio() {
+  if (S.ctx) return;
+  S.ctx = new AudioContext({ sampleRate: 48000 });
+  await S.ctx.audioWorklet.addModule('wmcore.js');
+  await S.ctx.audioWorklet.addModule('wm-player.js');
+  S.node = new AudioWorkletNode(S.ctx, 'wm-player', { numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { W: S.W } });
+  S.node.connect(S.ctx.destination);
+  S.node.port.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === 'pos') { S.pos = m.pos / 48000; S.playing = m.playing; }
+    if (m.type === 'ended') { S.playing = false; }
+  };
+  sendSchedule();
+}
+
+async function loadFile(file) {
+  await ensureAudio();
+  S.name = file.name.replace(/\.[^.]+$/, '');
+  $('fname').textContent = `Decoding ${file.name}…`;
+  const buf = await S.ctx.decodeAudioData(await file.arrayBuffer());
+  S.L = buf.getChannelData(0).slice();
+  S.R = (buf.numberOfChannels > 1 ? buf.getChannelData(1) : buf.getChannelData(0)).slice();
+  S.dur = buf.duration;
+  S.node.port.postMessage({ type: 'load', L: S.L.slice(), R: S.R.slice() });
+  $('fname').textContent = file.name;
+  $('player').classList.add('on');
+  $('dl').disabled = false;
+  await S.ctx.resume();
+  play(true);
+  updateMessage();
+}
+
+function play(on) {
+  if (!S.node || !S.L) return;
+  S.ctx.resume();
+  S.node.port.postMessage({ type: on ? 'play' : 'pause' });
+  S.playing = on;
+}
+
+$('browse').onclick = () => $('file').click();
+$('file').onchange = (e) => e.target.files[0] && loadFile(e.target.files[0]);
+const drop = $('drop');
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); };
+$('playBtn').onclick = () => play(!S.playing);
+$('bar').onclick = (e) => {
+  if (!S.L) return;
+  const r = $('bar').getBoundingClientRect(), t = ((e.clientX - r.left) / r.width) * S.dur;
+  S.node.port.postMessage({ type: 'seek', pos: Math.round(t * 48000) });
+};
+document.addEventListener('keydown', (e) => { if (e.code === 'Space' && document.activeElement !== $('msg')) { e.preventDefault(); play(!S.playing); } });
+
+// ---------- сообщение → пакеты ----------
+function parseSrt(text) {
+  const toSec = (s) => { const [h, m, r] = s.replace('.', ',').split(':'); const [sec, ms] = r.split(','); return +h * 3600 + +m * 60 + +sec + +ms / 1000; };
+  const cues = [];
+  for (const block of text.replace(/\r/g, '').trim().split(/\n\s*\n/)) {
+    const lines = block.split('\n');
+    const i = lines.findIndex((l) => /-->/.test(l));
+    if (i < 0) continue;
+    const m = lines[i].match(/(\d+:\d+:\d+[,.]\d+)\s*-->\s*(\d+:\d+:\d+[,.]\d+)/);
+    const body = lines.slice(i + 1).join(' ').replace(/<[^>]+>/g, '').trim();
+    if (m && body) cues.push({ start: toSec(m[1]), end: toSec(m[2]), text: body });
+  }
+  return cues;
+}
+
+// укладываем текст в максимальный пакет, отрезая слова с конца
+function fit(text) {
+  const max = S.W.packet.sizes[S.W.packet.sizes.length - 1];
+  let words = text.trim().split(/\s+/), bits = S.codec.encode(text.trim()), cut = false;
+  while (bits.length > max && words.length > 1) { words.pop(); bits = S.codec.encode(words.join(' ')); cut = true; }
+  return { text: words.join(' '), bits, cut };
+}
+
+let debounce = null;
+$('msg').addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(updateMessage, 250); });
+
+function updateMessage() {
+  if (!S.codec) return;
+  const raw = $('msg').value;
+  const stats = [], warn = [];
+  S.schedule = []; S.packet = null;
+  if (/\d+:\d+:\d+[,.]\d+\s*-->/.test(raw)) {
+    const cues = parseSrt(raw);
+    let short = 0;
+    for (const c of cues) {
+      const f = fit(c.text), pk = WMCore.buildPacket(S.W, f.bits);
+      S.schedule.push({ start: c.start, end: c.end, chips: pk.chips, packet: pk, text: f.text });
+      if (c.end - c.start < pk.seconds * 1.3) short++;
+    }
+    stats.push(`<span class="chip mode">SRT · ${cues.length} cues</span>`);
+    if (cues.length) stats.push(`<span class="chip">each cue loops within its own time range</span>`);
+    if (short) warn.push(`${short} of ${cues.length} cues are shorter than their packet loop — they're unlikely to be received. Sound-only transmission carries a few bits per second; long cues (≈40 s+) work best.`);
+  } else if (raw.trim()) {
+    const f = fit(raw), pk = WMCore.buildPacket(S.W, f.bits);
+    S.packet = pk;
+    S.schedule = [{ start: 0, end: 1e9, chips: pk.chips, packet: pk, text: f.text }];
+    stats.push(`<span class="chip mode">Looped message</span>`,
+      `<span class="chip">${f.text.length} chars → ${f.bits.length} bits</span>`,
+      `<span class="chip">packet ${pk.bits.length} bits · loops every ${pk.seconds.toFixed(0)} s</span>`);
+    if (f.cut) warn.push(`Too long for one packet — sending: “${f.text}”`);
+  } else stats.push('<span class="chip">Nothing to send yet</span>');
+  $('stats').innerHTML = stats.join('');
+  $('warn').innerHTML = warn.join('<br>');
+  $('warn').classList.toggle('on', warn.length > 0);
+  sendSchedule();
+  drawBits();
+}
+
+function sendSchedule() {
+  if (!S.node) return;
+  S.node.port.postMessage({ type: 'schedule', items: S.schedule.map(({ start, end, chips }) => ({ start, end, chips })) });
+}
+
+// ---------- визуализация передаваемых бит ----------
+let bitEls = [], bitKey = null;
+function currentItem() {
+  const t = S.pos;
+  return S.schedule.find((s) => t >= s.start && t < s.end) || null;
+}
+function drawBits() {
+  const it = currentItem() || S.schedule[0];
+  const key = it ? it.packet.bits.join('') : '';
+  $('tx').classList.toggle('on', !!it);
+  if (key === bitKey) return;
+  bitKey = key;
+  const box = $('bits'); box.innerHTML = ''; bitEls = [];
+  if (!it) return;
+  const ns = S.W.packet.sync_bits;
+  it.packet.bits.forEach((b, i) => {
+    const el = document.createElement('b');
+    if (b) el.classList.add('one');
+    if (i < ns) el.classList.add('sync');
+    box.appendChild(el); bitEls.push(el);
+  });
+}
+let lastCur = -1;
+function frame() {
+  if (S.dur) {
+    $('barFill').style.width = `${(100 * S.pos) / S.dur}%`;
+    $('time').textContent = `${fmt(S.pos)} / ${fmt(S.dur)}`;
+    $('playBtn').textContent = S.playing ? '❚❚' : '▶';
+  }
+  drawBits();
+  const it = currentItem();
+  if (it && bitEls.length) {
+    const halfDur = (S.W.half_hops * S.W.hop) / 48000;
+    const k = Math.floor((S.pos - it.start) / halfDur / 2) % it.packet.bits.length;
+    if (k !== lastCur) {
+      bitEls.forEach((el, i) => { el.classList.toggle('cur', i === k); el.classList.toggle('done', i < k); });
+      lastCur = k;
+    }
+    const loopPos = ((S.pos - it.start) % it.packet.seconds);
+    $('txLabel').textContent = S.playing ? `Transmitting “${it.text.length > 48 ? it.text.slice(0, 48) + '…' : it.text}”` : 'Paused';
+    $('txLoop').textContent = `${loopPos.toFixed(0)} / ${it.packet.seconds.toFixed(0)} s`;
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---------- Download MP3 ----------
+$('dl').onclick = async () => {
+  if (!S.L) return;
+  const btn = $('dl'), st = $('dlStatus');
+  btn.disabled = true;
+  try {
+    const emb = new WMCore.Embedder(S.W, 48000);
+    emb.schedule = S.schedule.map(({ start, end, chips }) => ({ start, end, chips }));
+    const [yL, yR] = await emb.render(S.L, S.R, (p) => { st.textContent = `Embedding… ${Math.round(p * 100)}%`; });
+    let peak = 0;
+    for (let i = 0; i < yL.length; i++) peak = Math.max(peak, Math.abs(yL[i]), Math.abs(yR[i]));
+    const g = peak > 0.99 ? 0.99 / peak : 1;
+    const enc = new lamejs.Mp3Encoder(2, 48000, 256), parts = [], n = yL.length, CH = 1152;
+    const iL = new Int16Array(CH), iR = new Int16Array(CH);
+    for (let i = 0; i < n; i += CH) {
+      const m = Math.min(CH, n - i);
+      for (let j = 0; j < m; j++) { iL[j] = Math.max(-32768, Math.min(32767, yL[i + j] * g * 32767)); iR[j] = Math.max(-32768, Math.min(32767, yR[i + j] * g * 32767)); }
+      const b = enc.encodeBuffer(iL.subarray(0, m), iR.subarray(0, m));
+      if (b.length) parts.push(new Uint8Array(b));
+      if ((i / CH) % 400 === 0) { st.textContent = `Encoding MP3… ${Math.round((100 * i) / n)}%`; await new Promise((r) => setTimeout(r, 0)); }
+    }
+    parts.push(new Uint8Array(enc.flush()));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(parts, { type: 'audio/mpeg' }));
+    a.download = `${S.name || 'audio'}-hidden.mp3`;
+    a.click();
+    st.textContent = 'Done — the file carries the message in any player.';
+  } catch (e) {
+    st.textContent = `Failed: ${e.message || e}`;
+  } finally { btn.disabled = false; }
+};
+
+init();
+</script>
+</body>
+</html>

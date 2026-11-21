@@ -1,0 +1,56 @@
+{
+  "version": 5,
+  "ultrasound": {
+    "base": 17900,
+    "spacing": 55,
+    "groups": 2,
+    "tones": 16,
+    "sym": 0.05,
+    "guard": 0.02,
+    "chirp": 0.25,
+    "gap": 0.02,
+    "hdr_nsym": 4,
+    "body_nsym": 8,
+    "max_len": 200
+  },
+  "watermark": {
+    "fft": 2048,
+    "hop": 512,
+    "half_hops": 6,
+    "fmin": 200,
+    "fmax": 6000,
+    "cell_hz": 46.875,
+    "seed": 20261121,
+    "sync": [
+      1,
+      0,
+      1,
+      1,
+      0,
+      0,
+      1,
+      0
+    ],
+    "id_bits": 4,
+    "time_bits": 12,
+    "pairs": true,
+    "alpha": 0.1,
+    "packet": {
+      "sizes": [
+        32,
+        48,
+        64,
+        80,
+        96,
+        112,
+        128,
+        160,
+        192,
+        224,
+        256
+      ],
+      "sync_bits": 24,
+      "tau": 60
+    }
+  }
+}

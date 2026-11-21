@@ -1,0 +1,10 @@
+.venv/
+.cert/
+__pycache__/
+.idea/
+.DS_Store
+*.mp3
+*.mp4
+*.wav
+web/videos/
+web/_test.wav
